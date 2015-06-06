@@ -1,22 +1,27 @@
 /**
+ * Simple Crawler Tool
  *
- *
- *
+ * TODO:
+ * 	  - remove link starting with javascript:,mailto:,sip:
+ *	  - collect links inside inline javascript (onclick)
+ * 	  - find error pages
+ *	  - sortout url parameters
+ *    - limit requests
+ *    - detect long waiting pages
  **/
 
 package main
 
 import (
- 	"log"
- 	"net/http"
-	"net/http/cookiejar"
-	"client"
+	"log"
+	"robot/bro"
+	"runtime"
 	"strings"
 	"time"
 )
 
-type Fetcher interface {
-	fetch(url string) (title string, urls []string, err error)
+type Client interface {
+	GetUrls(url string) (urls []string, err error)
 }
 
 type Task struct {
@@ -24,17 +29,28 @@ type Task struct {
 	depth int
 }
 
-func fetch(url string) (string, []string, error) {
-	urls, err := client.GetUrls(client_, url)
-	if err != nil {
-		return "", nil, err
+func normalize(host, url string) string {
+	if url == "#" {
+		return ""
 	}
-	return "", urls, nil
+	return host + url
 }
 
-func request(id int, url string, depth int, queue chan Task) {
+func validate(url string) bool {
+	return url != "" && !strings.Contains(url, "fckdsh")
+}
 
-	body, urls, err := fetch(url)
+func visit(url string, client Client) ([]string, error) {
+	urls, err := client.GetUrls(url)
+	if err != nil {
+		return nil, err
+	}
+	return urls, nil
+}
+
+func request(id int, url string, depth int, client Client, queue chan Task) {
+
+	urls, err := visit(url, client)
 
 	if err != nil {
 		log.Printf("[%d] error - %s\n", id, err)
@@ -42,25 +58,32 @@ func request(id int, url string, depth int, queue chan Task) {
 		return
 	}
 
-	log.Printf("[%d] %s, title: %q, depth: %d, more: %d\n", id, url, body, depth, len(urls))
+	if logLevel > 0 {
+		log.Printf("[%d] %s, depth: %d, more: %d\n", id, url, depth, len(urls))
+	}
 
 	queue <- Task{urls, depth + 1}
-
 }
 
-func crawl(root string, startUrl string, maxDepth int) {
+func crawl(host string, startUrl string, maxDepth int, client Client) int {
 
-	//var visited map[string]bool
+	var visited map[string]bool
 	var queue chan Task
 
 	visited = make(map[string]bool)
 	queue = make(chan Task)
 
+	startUrl = normalize(host, startUrl)
+
+	if !validate(startUrl) {
+		return 0
+	}
+
 	id := 1
 	waiting := 1
 	visited[startUrl] = true
 
-	go request(id, root + startUrl, 0, queue)
+	go request(id, startUrl, 0, client, queue)
 
 	for waiting > 0 {
 
@@ -68,17 +91,19 @@ func crawl(root string, startUrl string, maxDepth int) {
 
 		waiting--
 
-		if task.urls != nil && task.depth <= maxDepth {
+		if task.urls != nil && (maxDepth == -1 || task.depth <= maxDepth) {
 
 			for _, url := range task.urls {
 
-				if !visited[url] && !strings.Contains(url, "fckdsh") {
+				url = normalize(host, url)
+
+				if validate(url) && !visited[url] {
 
 					id++
 					waiting++
 					visited[url] = true
 
-					go request(id, root + url, task.depth, queue)
+					go request(id, url, task.depth, client, queue)
 
 				}
 
@@ -87,31 +112,38 @@ func crawl(root string, startUrl string, maxDepth int) {
 
 	}
 
+	return len(visited)
+
 }
 
-var visited map[string]bool
-var client_ *http.Client
+var logLevel int
 
 func timeTrack(start time.Time, name string) {
-    elapsed := time.Since(start)
-    log.Printf("%s took %s", name, elapsed)
+	elapsed := time.Since(start)
+	log.Printf("%s time: %s", name, elapsed)
 }
 
 func main() {
 
-	defer timeTrack(time.Now(), "App")
+	runtime.GOMAXPROCS(2)
 
-	client_ = &http.Client{}
-	jar, err := cookiejar.New(nil)
+	var mem1, mem2 runtime.MemStats
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	runtime.ReadMemStats(&mem1)
 
-    client_.Jar = jar
+	logLevel = 0
 
-	crawl("http://localhost:8080" , "/fx/auth", 2)
+	start := time.Now()
 
-	log.Printf("Visited: %d", len(visited))
+	client := bro.New(logLevel)
 
+	visited := crawl("http://localhost:8080", "/fx/auth", 5, client)
+
+	log.Printf("Visited: %d url(s) for %s", visited, time.Since(start))
+
+	runtime.GC()
+	runtime.ReadMemStats(&mem2)
+
+	log.Printf("Memory stat: %.2f Mb\n", float64(mem2.Sys-mem1.Sys)/(1024*1024))
+	log.Printf("Number of Goroutines: %d\n", runtime.NumGoroutine())
 }
