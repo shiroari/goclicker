@@ -9,33 +9,33 @@ func TestCrawlWithoutDeepLimit(t *testing.T) {
 
 	should := 5
 
-	visited := crawl("http://golang.org" , "/", -1, fetcher)
+	visited := crawl("http://golang.org", "/", 2, -1, fetcher)
 
 	if visited != should {
-		t.Errorf("Test shoud visit %d urls but was %d", should, visited)	
-	}	
+		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
+	}
 }
 
 func TestCrawlWithZeroDeepLimit(t *testing.T) {
 
 	should := 1
 
-	visited := crawl("http://golang.org" , "/", 0, fetcher)
+	visited := crawl("http://golang.org", "/", 2, 0, fetcher)
 
 	if visited != should {
-		t.Errorf("Test shoud visit %d urls but was %d", should, visited)	
-	}	
+		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
+	}
 }
 
 func TestCrawlWithDeepLimit(t *testing.T) {
 
 	should := 3
 
-	visited := crawl("http://golang.org" , "/", 1, fetcher)
+	visited := crawl("http://golang.org", "/", 2, 1, fetcher)
 
 	if visited != should {
-		t.Errorf("Test shoud visit %d urls but was %d", should, visited)	
-	}	
+		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
+	}
 }
 
 type webpage map[string][]string
@@ -66,5 +66,5 @@ var fetcher = webpage{
 	"http://golang.org/pkg/os/": []string{
 		"/",
 		"/pkg/",
-	},	
+	},
 }

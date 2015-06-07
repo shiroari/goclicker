@@ -6,7 +6,6 @@
  *	  - collect links inside inline javascript (onclick)
  * 	  - find error pages
  *	  - sortout url parameters
- *    - limit requests
  *    - detect long waiting pages
  **/
 
@@ -48,7 +47,13 @@ func visit(url string, client Client) ([]string, error) {
 	return urls, nil
 }
 
-func request(id int, url string, depth int, client Client, queue chan Task) {
+func request(id int, url string, depth int, client Client, queue chan Task, pool chan bool) {
+
+	defer func() {
+		<-pool
+	}()
+
+	pool <- true
 
 	urls, err := visit(url, client)
 
@@ -65,13 +70,11 @@ func request(id int, url string, depth int, client Client, queue chan Task) {
 	queue <- Task{urls, depth + 1}
 }
 
-func crawl(host string, startUrl string, maxDepth int, client Client) int {
+func crawl(host, startUrl string, maxParallelRequests, maxDepth int, client Client) int {
 
 	var visited map[string]bool
 	var queue chan Task
-
-	visited = make(map[string]bool)
-	queue = make(chan Task)
+	var pool chan bool
 
 	startUrl = normalize(host, startUrl)
 
@@ -79,11 +82,15 @@ func crawl(host string, startUrl string, maxDepth int, client Client) int {
 		return 0
 	}
 
+	visited = make(map[string]bool)
+	queue = make(chan Task)
+	pool = make(chan bool, maxParallelRequests)
+
 	id := 1
 	waiting := 1
 	visited[startUrl] = true
 
-	go request(id, startUrl, 0, client, queue)
+	go request(id, startUrl, 0, client, queue, pool)
 
 	for waiting > 0 {
 
@@ -103,7 +110,7 @@ func crawl(host string, startUrl string, maxDepth int, client Client) int {
 					waiting++
 					visited[url] = true
 
-					go request(id, url, task.depth, client, queue)
+					go request(id, url, task.depth, client, queue, pool)
 
 				}
 
@@ -116,34 +123,32 @@ func crawl(host string, startUrl string, maxDepth int, client Client) int {
 
 }
 
-var logLevel int
-
-func timeTrack(start time.Time, name string) {
-	elapsed := time.Since(start)
-	log.Printf("%s time: %s", name, elapsed)
+func showStatistics(start time.Time, mem1 *runtime.MemStats) {
+	_, mem2 := readStats()
+	log.Printf("Number of Goroutines: %d\n", runtime.NumGoroutine())
+	log.Printf("Memory stat: %.2f Mb\n", float64(mem2.Sys-mem1.Sys)/(1024*1024))
+	log.Printf("Time: %s\n", time.Since(start))
 }
+
+func readStats() (time.Time, *runtime.MemStats) {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	return time.Now(), &mem
+}
+
+var logLevel int
 
 func main() {
 
 	runtime.GOMAXPROCS(2)
 
-	var mem1, mem2 runtime.MemStats
+	defer showStatistics(readStats())
 
-	runtime.ReadMemStats(&mem1)
+	logLevel = 1
+	maxParallelRequests := 10
+	maxDepth := 2
 
-	logLevel = 0
+	visited := crawl("http://localhost:8080", "/fx/auth", maxParallelRequests, maxDepth, bro.New(logLevel))
 
-	start := time.Now()
-
-	client := bro.New(logLevel)
-
-	visited := crawl("http://localhost:8080", "/fx/auth", 5, client)
-
-	log.Printf("Visited: %d url(s) for %s", visited, time.Since(start))
-
-	runtime.GC()
-	runtime.ReadMemStats(&mem2)
-
-	log.Printf("Memory stat: %.2f Mb\n", float64(mem2.Sys-mem1.Sys)/(1024*1024))
-	log.Printf("Number of Goroutines: %d\n", runtime.NumGoroutine())
+	log.Printf("Visited %d url(s)", visited)
 }
