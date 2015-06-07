@@ -2,10 +2,8 @@
  * Simple Crawler Tool
  *
  * TODO:
- * 	  - remove link starting with javascript:,mailto:,sip:
- *	  - collect links inside inline javascript (onclick)
  * 	  - find error pages
- *	  - sortout url parameters
+ *	  - collect links inside inline javascript (onclick)
  *    - detect long waiting pages
  **/
 
@@ -13,6 +11,7 @@ package main
 
 import (
 	"log"
+	_url_ "net/url"
 	"robot/bro"
 	"runtime"
 	"strings"
@@ -28,11 +27,46 @@ type Task struct {
 	depth int
 }
 
-func normalize(host, url string) string {
-	if url == "#" {
+func normalize(root *_url_.URL, url string) string {
+
+	if url == "" || strings.HasPrefix(url, "#") {
 		return ""
 	}
-	return host + url
+
+	parsed, err := _url_.Parse(url)
+
+	if err != nil {
+		return ""
+	}
+
+	if parsed.IsAbs() {
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return ""
+		}
+	} else {
+		parsed = root.ResolveReference(parsed)
+	}
+
+	params := parsed.Query()
+
+	if len(params) > 0 {
+
+		newParams := _url_.Values{}
+
+		if uuid := params.Get("uuid"); uuid != "" {
+			newParams.Set("uuid", uuid)
+		}
+
+		if activeComponent := params.Get("activeComponent"); activeComponent != "" {
+			newParams.Set("activeComponent", activeComponent)
+		}
+
+		parsed.RawQuery = newParams.Encode()
+	}
+
+	parsed.Fragment = ""
+
+	return parsed.String()
 }
 
 func validate(url string) bool {
@@ -70,13 +104,19 @@ func request(id int, url string, depth int, client Client, queue chan Task, pool
 	queue <- Task{urls, depth + 1}
 }
 
-func crawl(host, startUrl string, maxParallelRequests, maxDepth int, client Client) int {
+func crawl(rootUrlStr, startUrl string, maxParallelRequests, maxDepth int, client Client) int {
 
 	var visited map[string]bool
 	var queue chan Task
 	var pool chan bool
 
-	startUrl = normalize(host, startUrl)
+	rootUrl, err := _url_.Parse(rootUrlStr)
+
+	if err != nil {
+		return 0
+	}
+
+	startUrl = normalize(rootUrl, startUrl)
 
 	if !validate(startUrl) {
 		return 0
@@ -102,7 +142,7 @@ func crawl(host, startUrl string, maxParallelRequests, maxDepth int, client Clie
 
 			for _, url := range task.urls {
 
-				url = normalize(host, url)
+				url = normalize(rootUrl, url)
 
 				if validate(url) && !visited[url] {
 
