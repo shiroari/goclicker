@@ -2,63 +2,77 @@ package main
 
 import (
 	"fmt"
-	_url_ "net/url"
+	net "net/url"
 	"testing"
 )
 
+func TestValidateShouldSkipInvalidURLs(t *testing.T) {
+
+	root, _ := net.Parse("http://localhost:8080/")
+
+	if validate(root, nil) {
+		t.Errorf("validate should skip nil")
+	}
+
+	if url, _ := net.Parse("host:8080"); validate(root, url) {
+		t.Errorf("validate should skip different domain")
+	}
+
+	if url, _ := net.Parse("javascript:void(0)"); validate(root, url) {
+		t.Errorf("validate should skip unexpected scheme")
+	}
+
+}
+
 func TestNormalizeShouldSkipInvalidURLs(t *testing.T) {
 
-	root, _ := _url_.Parse("http://localhost:8080/")
+	root, _ := net.Parse("http://localhost:8080/")
 
-	if res := normalize(root, ""); res != "" {
+	if res := normalize(root, ""); res != nil {
 		t.Errorf("normalize should skip empty url")
 	}
 
-	if res := normalize(root, "/"); res != "http://localhost:8080/" {
+	if res := normalize(root, "/"); res.String() != "http://localhost:8080/" {
 		t.Errorf("normalize should handle root url")
 	}
 
-	if res := normalize(root, "#"); res != "" {
+	if res := normalize(root, "#"); res != nil {
 		t.Errorf("normalize should skip url with empty fragment")
 	}
 
-	if res := normalize(root, "#fragment"); res != "" {
+	if res := normalize(root, "#fragment"); res != nil {
 		t.Errorf("normalize should skip url with any fragment")
-	}
-
-	if res := normalize(root, "javascript:void(0)"); res != "" {
-		t.Errorf("normalize should skip unexpected scheme")
 	}
 }
 
 func TestNormalizeShouldKeepOriginalHost(t *testing.T) {
 
-	root, _ := _url_.Parse("http://localhost:8080/")
+	root, _ := net.Parse("http://localhost:8080/")
 
-	if res := normalize(root, "http://host:8080/fx/"); res != "http://host:8080/fx/" {
+	if res := normalize(root, "http://host:8080/fx/"); res.String() != "http://host:8080/fx/" {
 		t.Errorf("normalize should keep original host")
 	}
 }
 
 func TestNormalizeShouldFixPath(t *testing.T) {
 
-	root, _ := _url_.Parse("http://localhost:8080/")
+	root, _ := net.Parse("http://localhost:8080/")
 
-	if res := normalize(root, "/fx/"); res != "http://localhost:8080/fx/" {
+	if res := normalize(root, "/fx/"); res.String() != "http://localhost:8080/fx/" {
 		t.Errorf("normalize should fix path: %s", res)
 	}
 
-	if res := normalize(root, "fx/"); res != "http://localhost:8080/fx/" {
+	if res := normalize(root, "fx/"); res.String() != "http://localhost:8080/fx/" {
 		t.Errorf("normalize should fix path: %s", res)
 	}
 
-	if res := normalize(root, "fx"); res != "http://localhost:8080/fx" {
+	if res := normalize(root, "fx"); res.String() != "http://localhost:8080/fx" {
 		t.Errorf("normalize should fix path: %s", res)
 	}
 
-	root2, _ := _url_.Parse("http://localhost:8080")
+	root2, _ := net.Parse("http://localhost:8080")
 
-	if res := normalize(root2, "fx"); res != "http://localhost:8080/fx" {
+	if res := normalize(root2, "fx"); res.String() != "http://localhost:8080/fx" {
 		t.Errorf("normalize should fix path: %s", res)
 	}
 
@@ -66,9 +80,9 @@ func TestNormalizeShouldFixPath(t *testing.T) {
 
 func TestNormalizeShouldDropFragment(t *testing.T) {
 
-	root, _ := _url_.Parse("http://localhost:8080/")
+	root, _ := net.Parse("http://localhost:8080/")
 
-	if res := normalize(root, "jsp#id"); res != "http://localhost:8080/jsp" {
+	if res := normalize(root, "jsp#id"); res.String() != "http://localhost:8080/jsp" {
 		t.Errorf("normalize should drop any fragment")
 	}
 
@@ -76,23 +90,23 @@ func TestNormalizeShouldDropFragment(t *testing.T) {
 
 func TestNormalizeShouldDropNotRelevantQueryParamsAndSortOthers(t *testing.T) {
 
-	root, _ := _url_.Parse("http://localhost:8080/")
+	root, _ := net.Parse("http://localhost:8080/")
 
 	should1 := "http://localhost:8080/?activeComponent=Reports&uuid=coreboo2k02bo0000kfd4plquvalkl6k"
-	if res := normalize(root, "?uuid=coreboo2k02bo0000kfd4plquvalkl6k&activeComponent=Reports"); res != should1 {
+	if res := normalize(root, "?uuid=coreboo2k02bo0000kfd4plquvalkl6k&activeComponent=Reports"); res.String() != should1 {
 		t.Errorf("normalize should sort query params: %s", res)
 	}
 
-	if res := normalize(root, "http://localhost:8080/?uuid=coreboo2k02bo0000kfd4plquvalkl6k&activeComponent=Reports"); res != should1 {
+	if res := normalize(root, "http://localhost:8080/?uuid=coreboo2k02bo0000kfd4plquvalkl6k&activeComponent=Reports"); res.String() != should1 {
 		t.Errorf("normalize should sort query params: %s", res)
 	}
 
 	should2 := "http://localhost:8080/?activeComponent=Reports"
-	if res := normalize(root, "?activeComponent=Reports&dropme=yes"); res != should2 {
+	if res := normalize(root, "?activeComponent=Reports&dropme=yes"); res.String() != should2 {
 		t.Errorf("normalize should drop not relevant query params: %s", res)
 	}
 
-	if res := normalize(root, "http://localhost:8080/?activeComponent=Reports&dropme=yes"); res != should2 {
+	if res := normalize(root, "http://localhost:8080/?activeComponent=Reports&dropme=yes"); res.String() != should2 {
 		t.Errorf("normalize should drop not relevant query params: %s", res)
 	}
 }

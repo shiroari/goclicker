@@ -2,20 +2,23 @@
  * Simple Crawler Tool
  *
  * TODO:
- * 	  - find error pages
  *	  - collect links inside inline javascript (onclick)
  *    - detect long waiting pages
+ *    - SIGTERM
  **/
 
 package main
 
 import (
 	"log"
-	_url_ "net/url"
+	net "net/url"
+	"os"
 	"robot/bro"
 	"runtime"
 	"strings"
 	"time"
+
+	"golang.org/x/net/html"
 )
 
 type Client interface {
@@ -27,31 +30,27 @@ type Task struct {
 	depth int
 }
 
-func normalize(root *_url_.URL, url string) string {
+func normalize(site *net.URL, url string) *net.URL {
 
 	if url == "" || strings.HasPrefix(url, "#") {
-		return ""
+		return nil
 	}
 
-	parsed, err := _url_.Parse(url)
+	parsed, err := net.Parse(url)
 
 	if err != nil {
-		return ""
+		return nil
 	}
 
-	if parsed.IsAbs() {
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return ""
-		}
-	} else {
-		parsed = root.ResolveReference(parsed)
+	if !parsed.IsAbs() {
+		parsed = site.ResolveReference(parsed)
 	}
 
 	params := parsed.Query()
 
 	if len(params) > 0 {
 
-		newParams := _url_.Values{}
+		newParams := net.Values{}
 
 		if uuid := params.Get("uuid"); uuid != "" {
 			newParams.Set("uuid", uuid)
@@ -66,11 +65,15 @@ func normalize(root *_url_.URL, url string) string {
 
 	parsed.Fragment = ""
 
-	return parsed.String()
+	return parsed
 }
 
-func validate(url string) bool {
-	return url != "" && !strings.Contains(url, "fckdsh")
+func validate(site, url *net.URL) bool {
+	return url != nil &&
+		url.Scheme == site.Scheme &&
+		url.Host == site.Host &&
+		url.Path != "/fx/" &&
+		!strings.Contains(url.String(), "fckdsh")
 }
 
 func visit(url string, client Client) ([]string, error) {
@@ -104,21 +107,15 @@ func request(id int, url string, depth int, client Client, queue chan Task, pool
 	queue <- Task{urls, depth + 1}
 }
 
-func crawl(rootUrlStr, startUrl string, maxParallelRequests, maxDepth int, client Client) int {
+func crawl(site, url string, maxParallelRequests, maxDepth int, client Client) int {
 
 	var visited map[string]bool
 	var queue chan Task
 	var pool chan bool
 
-	rootUrl, err := _url_.Parse(rootUrlStr)
+	siteUrl, err := net.Parse(site)
 
 	if err != nil {
-		return 0
-	}
-
-	startUrl = normalize(rootUrl, startUrl)
-
-	if !validate(startUrl) {
 		return 0
 	}
 
@@ -126,11 +123,32 @@ func crawl(rootUrlStr, startUrl string, maxParallelRequests, maxDepth int, clien
 	queue = make(chan Task)
 	pool = make(chan bool, maxParallelRequests)
 
-	id := 1
-	waiting := 1
-	visited[startUrl] = true
+	id := 0
+	waiting := 0
 
-	go request(id, startUrl, 0, client, queue, pool)
+	newRequest := func(nextUrl string, depth int) {
+
+		resolved := normalize(siteUrl, nextUrl)
+
+		if !validate(siteUrl, resolved) {
+			return
+		}
+
+		url := resolved.String()
+
+		if !visited[url] {
+
+			id++
+			waiting++
+			visited[url] = true
+
+			go request(id, url, depth, client, queue, pool)
+
+		}
+
+	}
+
+	newRequest(url, 0)
 
 	for waiting > 0 {
 
@@ -142,17 +160,7 @@ func crawl(rootUrlStr, startUrl string, maxParallelRequests, maxDepth int, clien
 
 			for _, url := range task.urls {
 
-				url = normalize(rootUrl, url)
-
-				if validate(url) && !visited[url] {
-
-					id++
-					waiting++
-					visited[url] = true
-
-					go request(id, url, task.depth, client, queue, pool)
-
-				}
+				newRequest(url, task.depth)
 
 			}
 		}
@@ -161,6 +169,44 @@ func crawl(rootUrlStr, startUrl string, maxParallelRequests, maxDepth int, clien
 
 	return len(visited)
 
+}
+
+func findErrorPage(url string, status int, doc *html.Node) {
+
+	if status != 200 {
+		logPageError(url, status, "Broken page")
+		return
+	}
+
+	loginForm := bro.First(bro.GetElementsById(doc, "LogonForm"))
+
+	if loginForm != nil {
+		logPageError(url, status, "Login form detected")
+		os.Exit(1)
+	}
+
+	trace := bro.First(bro.GetElementsById(doc, "stackTrace"))
+
+	if trace != nil {
+		logPageError(url, status, "Broken page")
+		return
+	}
+
+	error1 := bro.First(bro.GetElementsByClass(doc, "error"))
+
+	if error1 != nil {
+		logPageError(url, status, bro.GetText(error1))
+	}
+
+	error2 := bro.First(bro.GetElementsByClass(doc, "message-error"))
+
+	if error2 != nil {
+		logPageError(url, status, bro.GetText(error2))
+	}
+}
+
+func logPageError(url string, status int, message string) {
+	log.Printf("Error page %d :: %s :: %s\n", status, url, message)
 }
 
 func showStatistics(start time.Time, mem1 *runtime.MemStats) {
@@ -185,10 +231,12 @@ func main() {
 	defer showStatistics(readStats())
 
 	logLevel = 1
-	maxParallelRequests := 10
-	maxDepth := 2
+	maxParallelRequests := 20
+	maxDepth := -1
 
-	visited := crawl("http://localhost:8080", "/fx/auth", maxParallelRequests, maxDepth, bro.New(logLevel))
+	client := bro.New(0, findErrorPage)
+
+	visited := crawl("http://localhost:8080", "/fx/auth", maxParallelRequests, maxDepth, client)
 
 	log.Printf("Visited %d url(s)", visited)
 }

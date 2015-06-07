@@ -1,12 +1,12 @@
 package bro
 
 import (
-	"log"
-	"time"
- 	"net/http"
- 	"net/http/httputil"
-	"net/http/cookiejar"	
 	"container/list"
+	"log"
+	"net/http"
+	"net/http/cookiejar"
+	"net/http/httputil"
+	"time"
 
 	"golang.org/x/net/html"
 	//"code.google.com/p/go-html-transform/css/selector"
@@ -14,12 +14,15 @@ import (
 
 /*  Client */
 
+type DocumentCallbackFunc func(url string, status int, doc *html.Node)
+
 type Client struct {
-	client http.Client
+	client   http.Client
+	callback DocumentCallbackFunc
 	logLevel int
 }
 
-func New(logLevel int) *Client{
+func New(logLevel int, callback DocumentCallbackFunc) *Client {
 
 	jar, err := cookiejar.New(nil)
 
@@ -29,9 +32,9 @@ func New(logLevel int) *Client{
 		log.Fatal(err)
 	}
 
-    client.Jar = jar
+	client.Jar = jar
 
-    return &Client{client, logLevel}
+	return &Client{client, callback, logLevel}
 }
 
 func (self *Client) GetUrls(uri string) ([]string, error) {
@@ -42,13 +45,13 @@ func (self *Client) GetUrls(uri string) ([]string, error) {
 	request.SetBasicAuth("system", "manager")
 
 	if self.logLevel > 0 {
-		log.Printf("-> GET %s", uri)	
+		log.Printf("-> GET %s", uri)
 		if self.logLevel > 1 {
 			dump, err := httputil.DumpRequestOut(request, (self.logLevel > 2))
 			if err == nil {
 				log.Printf("-> %s", dump)
 			}
-		}		
+		}
 	}
 
 	resp, err := self.client.Do(request)
@@ -65,8 +68,8 @@ func (self *Client) GetUrls(uri string) ([]string, error) {
 			dump, err := httputil.DumpResponse(resp, (self.logLevel > 2))
 			if err == nil {
 				log.Printf("<- %s", dump)
-			}		
-		}		
+			}
+		}
 	}
 
 	doc, err := html.Parse(resp.Body)
@@ -75,12 +78,16 @@ func (self *Client) GetUrls(uri string) ([]string, error) {
 		return nil, err
 	}
 
-	links := getElementsByTag(doc, "a")	
+	if self.callback != nil {
+		self.callback(uri, resp.StatusCode, doc)
+	}
+
+	links := GetElementsByTag(doc, "a")
 	res := make([]string, links.Len())
 
 	i := 0
 	for e := links.Front(); e != nil; e = e.Next() {
-		res[i] = getAttribute(e.Value.(*html.Node), "href")
+		res[i] = GetAttribute(e.Value.(*html.Node), "href")
 		i++
 	}
 
@@ -101,7 +108,7 @@ func visit(n *html.Node, filter filterFunc, action actionFunc) {
 	}
 }
 
-func getElementsByTag(node *html.Node, tag string) *list.List {
+func GetElementsByTag(node *html.Node, tag string) *list.List {
 
 	selected := list.New()
 
@@ -121,13 +128,13 @@ func getElementsByTag(node *html.Node, tag string) *list.List {
 	return selected
 }
 
-func getElementsByClass(node *html.Node, name string) *list.List {
+func GetElementsByClass(node *html.Node, name string) *list.List {
 
 	selected := list.New()
 
 	visit(node,
 		func(n *html.Node) bool {
-			if name == getAttribute(n, "class") {
+			if name == GetAttribute(n, "class") {
 				return true
 			}
 			return false
@@ -139,7 +146,25 @@ func getElementsByClass(node *html.Node, name string) *list.List {
 	return selected
 }
 
-func getText(node *html.Node) string {
+func GetElementsById(node *html.Node, name string) *list.List {
+
+	selected := list.New()
+
+	visit(node,
+		func(n *html.Node) bool {
+			if name == GetAttribute(n, "id") {
+				return true
+			}
+			return false
+		},
+		func(n *html.Node) {
+			selected.PushBack(n)
+		})
+
+	return selected
+}
+
+func GetText(node *html.Node) string {
 
 	res := ""
 
@@ -154,7 +179,7 @@ func getText(node *html.Node) string {
 	return res
 }
 
-func getAttribute(node *html.Node, name string) string {
+func GetAttribute(node *html.Node, name string) string {
 	if node.Type != html.ElementNode {
 		return ""
 	}
@@ -164,4 +189,11 @@ func getAttribute(node *html.Node, name string) string {
 		}
 	}
 	return ""
+}
+
+func First(nodes *list.List) *html.Node {
+	if nodes.Len() > 0 {
+		return nodes.Front().Value.(*html.Node)
+	}
+	return nil
 }
