@@ -4,6 +4,10 @@ import (
 	"fmt"
 	net "net/url"
 	"testing"
+
+	"golang.org/x/net/html"
+
+	"robot/bro"
 )
 
 func TestValidateShouldSkipInvalidURLs(t *testing.T) {
@@ -115,7 +119,7 @@ func TestCrawlWithoutDeepLimit(t *testing.T) {
 
 	should := 5
 
-	visited := crawl("http://golang.org", "/", 2, -1, fetcher)
+	visited := crawl("http://golang.org", "/", 2, -1, &clientMock{}, &parserMock{})
 
 	if visited != should {
 		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
@@ -126,7 +130,7 @@ func TestCrawlWithZeroDeepLimit(t *testing.T) {
 
 	should := 1
 
-	visited := crawl("http://golang.org", "/", 2, 0, fetcher)
+	visited := crawl("http://golang.org", "/", 2, 0, &clientMock{}, &parserMock{})
 
 	if visited != should {
 		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
@@ -137,23 +141,29 @@ func TestCrawlWithDeepLimit(t *testing.T) {
 
 	should := 3
 
-	visited := crawl("http://golang.org", "/", 2, 1, fetcher)
+	visited := crawl("http://golang.org", "/", 2, 1, &clientMock{}, &parserMock{})
 
 	if visited != should {
 		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
 	}
 }
 
-type webpage map[string][]string
+type parserMock struct{}
+type clientMock struct{}
 
-func (self webpage) GetUrls(url string) ([]string, error) {
-	if res, ok := self[url]; ok {
-		return res, nil
-	}
-	return nil, fmt.Errorf("not found: %s", url)
+func (self *parserMock) Parse(status int, url string, doc *html.Node) ([]string, []string) {
+	return data[url], nil
 }
 
-var fetcher = webpage{
+func (self *clientMock) RequestUrl(url string, callback bro.DocumentCallbackFunc) (int, error) {
+	if _, ok := data[url]; ok {
+		callback(200, url, nil)
+		return 200, nil
+	}
+	return -1, fmt.Errorf("not found: %s", url)
+}
+
+var data = map[string][]string{
 	"http://golang.org/": []string{
 		"/pkg/",
 		"/cmd/",

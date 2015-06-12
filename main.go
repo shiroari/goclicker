@@ -2,9 +2,9 @@
  * Simple Crawler Tool
  *
  * TODO:
- *	  - collect links inside inline javascript (onclick)
- *    - detect long waiting pages
+ *	  - CLI
  *    - SIGTERM
+ *    - Detect long loading pages
  **/
 
 package main
@@ -12,17 +12,22 @@ package main
 import (
 	"log"
 	net "net/url"
-	"os"
-	"robot/bro"
 	"runtime"
 	"strings"
 	"time"
 
 	"golang.org/x/net/html"
+
+	"robot/bro"
+	p "robot/parser"
 )
 
 type Client interface {
-	GetUrls(url string) (urls []string, err error)
+	RequestUrl(url string, callback bro.DocumentCallbackFunc) (int, error)
+}
+
+type Parser interface {
+	Parse(status int, url string, doc *html.Node) ([]string, []string)
 }
 
 type Task struct {
@@ -30,6 +35,16 @@ type Task struct {
 	depth int
 }
 
+//
+// Normalize trasforms urls to absolute one if necessary.
+// Query parameters will be removed except 'uuid' and 'activeComponent'. Remained parameters will be sorted.
+// Fragments will be removed. If url is empty, '#', or can not be parsed then method returns nil.
+// Note. Relative url is supposed to be with base equals site host even it not begins with slash.
+//
+// Examples:
+//		www.example.com/user, www.example.com/images?name=holidays -> www.example.com/images
+//		www.example.com/user, /images?name=holidays -> www.example.com/images
+//		www.example.com/user, images?name=holidays -> www.example.com/images
 func normalize(site *net.URL, url string) *net.URL {
 
 	if url == "" || strings.HasPrefix(url, "#") {
@@ -68,6 +83,9 @@ func normalize(site *net.URL, url string) *net.URL {
 	return parsed
 }
 
+//
+// Validate if url is internal and not empty
+//
 func validate(site, url *net.URL) bool {
 	return url != nil &&
 		url.Scheme == site.Scheme &&
@@ -76,15 +94,21 @@ func validate(site, url *net.URL) bool {
 		!strings.Contains(url.String(), "fckdsh")
 }
 
-func visit(url string, client Client) ([]string, error) {
-	urls, err := client.GetUrls(url)
+func visit(url string, client Client, parser Parser) ([]string, error) {
+	var urls, errors []string
+	status, err := client.RequestUrl(url, func(status int, url string, doc *html.Node) {
+		urls, errors = parser.Parse(status, url, doc)
+	})
 	if err != nil {
 		return nil, err
+	}
+	if errors != nil {
+		logPageError(url, status, errors)
 	}
 	return urls, nil
 }
 
-func request(id int, url string, depth int, client Client, queue chan Task, pool chan bool) {
+func request(id int, url string, depth int, client Client, parser Parser, queue chan Task, pool chan bool) {
 
 	defer func() {
 		<-pool
@@ -92,7 +116,7 @@ func request(id int, url string, depth int, client Client, queue chan Task, pool
 
 	pool <- true
 
-	urls, err := visit(url, client)
+	urls, err := visit(url, client, parser)
 
 	if err != nil {
 		log.Printf("[%d] error - %s\n", id, err)
@@ -107,7 +131,7 @@ func request(id int, url string, depth int, client Client, queue chan Task, pool
 	queue <- Task{urls, depth + 1}
 }
 
-func crawl(site, url string, maxParallelRequests, maxDepth int, client Client) int {
+func crawl(site, url string, maxParallelRequests, maxDepth int, client Client, parser Parser) int {
 
 	var visited map[string]bool
 	var queue chan Task
@@ -142,7 +166,7 @@ func crawl(site, url string, maxParallelRequests, maxDepth int, client Client) i
 			waiting++
 			visited[url] = true
 
-			go request(id, url, depth, client, queue, pool)
+			go request(id, url, depth, client, parser, queue, pool)
 
 		}
 
@@ -171,42 +195,10 @@ func crawl(site, url string, maxParallelRequests, maxDepth int, client Client) i
 
 }
 
-func findErrorPage(url string, status int, doc *html.Node) {
-
-	if status != 200 {
-		logPageError(url, status, "Broken page")
-		return
+func logPageError(url string, status int, errors []string) {
+	for err := range errors {
+		log.Printf("Error page %d :: %s :: %s\n", status, url, err)
 	}
-
-	loginForm := bro.First(bro.GetElementsById(doc, "LogonForm"))
-
-	if loginForm != nil {
-		logPageError(url, status, "Login form detected")
-		os.Exit(1)
-	}
-
-	trace := bro.First(bro.GetElementsById(doc, "stackTrace"))
-
-	if trace != nil {
-		logPageError(url, status, "Broken page")
-		return
-	}
-
-	error1 := bro.First(bro.GetElementsByClass(doc, "error"))
-
-	if error1 != nil {
-		logPageError(url, status, bro.GetText(error1))
-	}
-
-	error2 := bro.First(bro.GetElementsByClass(doc, "message-error"))
-
-	if error2 != nil {
-		logPageError(url, status, bro.GetText(error2))
-	}
-}
-
-func logPageError(url string, status int, message string) {
-	log.Printf("Error page %d :: %s :: %s\n", status, url, message)
 }
 
 func showStatistics(start time.Time, mem1 *runtime.MemStats) {
@@ -226,7 +218,7 @@ var logLevel int
 
 func main() {
 
-	runtime.GOMAXPROCS(2)
+	//runtime.GOMAXPROCS(2)
 
 	defer showStatistics(readStats())
 
@@ -234,9 +226,10 @@ func main() {
 	maxParallelRequests := 20
 	maxDepth := -1
 
-	client := bro.New(0, findErrorPage)
+	client := bro.New("system", "manager", 0)
+	parser := p.New()
 
-	visited := crawl("http://localhost:8080", "/fx/auth", maxParallelRequests, maxDepth, client)
+	visited := crawl("http://localhost:8080", "/fx/auth", maxParallelRequests, maxDepth, client, parser)
 
 	log.Printf("Visited %d url(s)", visited)
 }

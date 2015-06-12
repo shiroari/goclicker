@@ -14,15 +14,16 @@ import (
 
 /*  Client */
 
-type DocumentCallbackFunc func(url string, status int, doc *html.Node)
+type DocumentCallbackFunc func(status int, url string, doc *html.Node)
 
 type Client struct {
 	client   http.Client
-	callback DocumentCallbackFunc
+	user     string
+	password string
 	logLevel int
 }
 
-func New(logLevel int, callback DocumentCallbackFunc) *Client {
+func New(user, password string, logLevel int) *Client {
 
 	jar, err := cookiejar.New(nil)
 
@@ -34,18 +35,18 @@ func New(logLevel int, callback DocumentCallbackFunc) *Client {
 
 	client.Jar = jar
 
-	return &Client{client, callback, logLevel}
+	return &Client{client, user, password, logLevel}
 }
 
-func (self *Client) GetUrls(uri string) ([]string, error) {
+func (self *Client) RequestUrl(url string, callback DocumentCallbackFunc) (int, error) {
 
 	timer := time.Now()
 
-	request, err := http.NewRequest("GET", uri, nil)
-	request.SetBasicAuth("system", "manager")
+	request, err := http.NewRequest("GET", url, nil)
+	request.SetBasicAuth(self.user, self.password)
 
 	if self.logLevel > 0 {
-		log.Printf("-> GET %s", uri)
+		log.Printf("-> GET %s", url)
 		if self.logLevel > 1 {
 			dump, err := httputil.DumpRequestOut(request, (self.logLevel > 2))
 			if err == nil {
@@ -57,13 +58,13 @@ func (self *Client) GetUrls(uri string) ([]string, error) {
 	resp, err := self.client.Do(request)
 
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
 
 	defer resp.Body.Close()
 
 	if self.logLevel > 0 {
-		log.Printf("<- %s, Time: %s, Length: %d :: %s", resp.Status, time.Since(timer), resp.ContentLength, uri)
+		log.Printf("<- %s, Time: %s, Length: %d :: %s", resp.Status, time.Since(timer), resp.ContentLength, url)
 		if self.logLevel > 1 {
 			dump, err := httputil.DumpResponse(resp, (self.logLevel > 2))
 			if err == nil {
@@ -75,23 +76,14 @@ func (self *Client) GetUrls(uri string) ([]string, error) {
 	doc, err := html.Parse(resp.Body)
 	if err != nil {
 		log.Panic(err)
-		return nil, err
+		return -1, err
 	}
 
-	if self.callback != nil {
-		self.callback(uri, resp.StatusCode, doc)
+	if callback != nil {
+		callback(resp.StatusCode, url, doc)
 	}
 
-	links := GetElementsByTag(doc, "a")
-	res := make([]string, links.Len())
-
-	i := 0
-	for e := links.Front(); e != nil; e = e.Next() {
-		res[i] = GetAttribute(e.Value.(*html.Node), "href")
-		i++
-	}
-
-	return res, nil
+	return resp.StatusCode, nil
 }
 
 /*  Helpers */
