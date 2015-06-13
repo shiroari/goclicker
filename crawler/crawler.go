@@ -33,8 +33,11 @@ type Crawler struct {
 }
 
 type Task struct {
-	urls  []string
-	depth int
+	url    string
+	status int
+	urls   []string
+	errors []string
+	depth  int
 }
 
 //
@@ -96,18 +99,12 @@ func validate(site, url *net.URL) bool {
 		!strings.Contains(url.String(), "fckdsh")
 }
 
-func (self *Crawler) visit(url string) ([]string, error) {
+func (self *Crawler) visit(url string, depth int) (Task, error) {
 	var urls, errors []string
 	status, err := self.Client.RequestUrl(url, func(status int, url string, doc *html.Node) {
 		urls, errors = self.Parser.Parse(status, url, doc)
 	})
-	if err != nil {
-		return nil, err
-	}
-	if self.Listener != nil {
-		self.Listener.On(status, url, urls, errors)
-	}
-	return urls, nil
+	return Task{url, status, urls, errors, depth + 1}, err
 }
 
 func (self *Crawler) request(id int, url string, depth int, queue chan Task, pool chan bool) {
@@ -118,19 +115,17 @@ func (self *Crawler) request(id int, url string, depth int, queue chan Task, poo
 
 	pool <- true
 
-	urls, err := self.visit(url)
+	task, err := self.visit(url, depth)
 
 	if err != nil {
 		log.Printf("[%d] error - %s\n", id, err)
-		queue <- Task{nil, depth + 1}
-		return
+	} else {
+		if self.LogLevel > 0 {
+			log.Printf("[%d] %s, depth: %d, more: %d\n", id, url, depth, len(task.urls))
+		}
 	}
 
-	if self.LogLevel > 0 {
-		log.Printf("[%d] %s, depth: %d, more: %d\n", id, url, depth, len(urls))
-	}
-
-	queue <- Task{urls, depth + 1}
+	queue <- task
 }
 
 func (self *Crawler) Start(url string) int {
@@ -181,6 +176,10 @@ func (self *Crawler) Start(url string) int {
 		task := <-queue
 
 		waiting--
+
+		if self.Listener != nil {
+			self.Listener.On(task.status, task.url, task.urls, task.errors)
+		}
 
 		if task.urls != nil && (self.MaxDepth == -1 || task.depth <= self.MaxDepth) {
 
