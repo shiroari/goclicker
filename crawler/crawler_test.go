@@ -1,4 +1,4 @@
-package main
+package crawler
 
 import (
 	"fmt"
@@ -119,7 +119,7 @@ func TestCrawlWithoutDeepLimit(t *testing.T) {
 
 	should := 5
 
-	visited := crawl("http://golang.org", "/", 2, -1, &clientMock{}, &parserMock{})
+	visited := crawl("/", mockConfig(-1))
 
 	if visited != should {
 		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
@@ -130,7 +130,7 @@ func TestCrawlWithZeroDeepLimit(t *testing.T) {
 
 	should := 1
 
-	visited := crawl("http://golang.org", "/", 2, 0, &clientMock{}, &parserMock{})
+	visited := crawl("/", mockConfig(0))
 
 	if visited != should {
 		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
@@ -141,11 +141,15 @@ func TestCrawlWithDeepLimit(t *testing.T) {
 
 	should := 3
 
-	visited := crawl("http://golang.org", "/", 2, 1, &clientMock{}, &parserMock{})
+	visited := crawl("/", mockConfig(1))
 
 	if visited != should {
 		t.Errorf("Test shoud visit %d urls but was %d", should, visited)
 	}
+}
+
+func mock(maxDepth int) *Config {
+	return &Crawler{"http://golang.org", 2, maxDepth, &clientMock{}, &parserMock{}, nil}
 }
 
 type parserMock struct{}

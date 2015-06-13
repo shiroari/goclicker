@@ -1,4 +1,4 @@
-package parser
+package main
 
 import (
 	"fmt"
@@ -9,10 +9,6 @@ import (
 )
 
 type Parser struct{}
-
-func New() *Parser {
-	return &Parser{}
-}
 
 func (self *Parser) Parse(status int, url string, doc *html.Node) ([]string, []string) {
 
