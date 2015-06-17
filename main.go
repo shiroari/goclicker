@@ -16,6 +16,8 @@ import (
 
 	"robot/bro"
 	c "robot/crawler"
+	l "robot/logger"
+	p "robot/parser"
 )
 
 func showStatistics(start time.Time, mem1 *runtime.MemStats) {
@@ -42,14 +44,14 @@ func main() {
 	logLevel = 1
 	maxParallelRequests := 20
 	maxDepth := -1
-	logger := &Logger{}
+	logger := &l.Logger{}
 
 	crawler := c.Crawler{
 		"http://localhost:8080",
 		maxParallelRequests,
 		maxDepth,
 		bro.New("system", "manager", logLevel),
-		&Parser{},
+		&p.Parser{},
 		logger,
 		logLevel}
 
