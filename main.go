@@ -37,7 +37,7 @@ var logLevel int
 
 func main() {
 
-	//runtime.GOMAXPROCS(2)
+	runtime.GOMAXPROCS(2)
 
 	defer showStatistics(readStats())
 
@@ -55,9 +55,9 @@ func main() {
 		logger,
 		logLevel}
 
-	logger.PrintStat()
-
 	visited := crawler.Start("/fx/auth")
+
+	logger.PrintStat()
 
 	log.Printf("Visited %d url(s)", visited)
 }

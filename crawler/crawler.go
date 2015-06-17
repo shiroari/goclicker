@@ -95,8 +95,7 @@ func validate(site, url *net.URL) bool {
 	return url != nil &&
 		url.Scheme == site.Scheme &&
 		url.Host == site.Host &&
-		url.Path != "/fx/" &&
-		!strings.Contains(url.String(), "fckdsh")
+		url.Path != "/fx/"
 }
 
 func (self *Crawler) visit(url string, depth int) (Task, error) {
